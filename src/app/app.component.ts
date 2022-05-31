@@ -1,17 +1,5 @@
 import {Component} from '@angular/core';
-import {
-  BehaviorSubject,
-  debounceTime,
-  distinctUntilChanged,
-  first,
-  merge,
-  mergeMap,
-  Observable,
-  of,
-  pairwise,
-  startWith,
-  Subject,
-} from 'rxjs';
+import {BehaviorSubject, debounceTime, merge, Observable, pairwise, startWith, Subject, switchMap, tap,} from 'rxjs';
 
 const DEBOUNCE_TIME_IN_MS = 1_000;
 
@@ -21,28 +9,31 @@ interface Item {
 }
 
 function customDebounce(time: number) {
-  const debounceQueueSubject = new BehaviorSubject<Item | null>(null);
-  const debounceQueue = debounceQueueSubject.pipe(debounceTime(time));
-
   return function (source: Observable<Item>): Observable<Item | null> {
+    const debounceQueueSubject = new BehaviorSubject<Item | null>(null);
+    let debouncePending: boolean = false;
+    const debounceQueue = debounceQueueSubject.pipe(
+      tap(() => debouncePending = true),
+      debounceTime(time),
+      tap(() => debouncePending = false),
+    );
+
     return source.pipe(
       startWith(null),
       pairwise(),
-      mergeMap(([oldItem, newItem]) => {
+      switchMap(([oldItem, newItem]) => {
         if (!newItem) {
           throw 'Missing Item';
         }
 
         if (!oldItem || oldItem.id === newItem.id) {
           debounceQueueSubject.next(newItem);
-          return debounceQueue.pipe(first());
+          return debounceQueue;
         } else {
           debounceQueueSubject.next(newItem);
-          return of(oldItem);
+          return debouncePending ? debounceQueue.pipe(startWith(oldItem)) :  debounceQueue;
         }
       }),
-      // TODO: try to refactor the function by removing the operator distinctUntilChanged (memory leak)
-      distinctUntilChanged((oldItem, newItem) => JSON.stringify(oldItem) === JSON.stringify(newItem)),
     )
   };
 }
